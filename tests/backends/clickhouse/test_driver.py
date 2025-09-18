@@ -25,16 +25,6 @@ class IterationTests(TestCase):
         cls.a1, cls.a2, cls.a3 = models.Author.objects.bulk_create(
             [models.Author(name="a1"), models.Author(name="a2"), models.Author(name="a3")]
         )
-
-    def find_root_exceptions(self, exception):
-        """Recursively finds the root cause in an exception chain"""
-        if exception.__cause__ is not None:
-            return self.find_root_exceptions(exception.__cause__)
-        elif exception.__context__ is not None:
-            return self.find_root_exceptions(exception.__context__)
-        else:
-            return exception
-
     
     def test_connection_unusable_when_iteration_interrupted(self):
         pool = connection.connection.pool
