@@ -28,6 +28,7 @@ class ClickhousePool:
         self._rused = {}
         self._keys = 0
         self._lock = threading.Lock()
+        self.check_if_connection_valid = None
 
         for _ in range(self.connections_min):
             self._connect()
@@ -49,6 +50,9 @@ class ClickhousePool:
         """Get an unused key."""
         self._keys += 1
         return self._keys
+
+    def _set_check_if_connection_valid(self, value: bool):
+        self.check_if_connection_valid = value
 
     def pull(self, key: Union[str, None] = None) -> Client:
         """Get an available client from the pool.
@@ -105,6 +109,11 @@ class ClickhousePool:
                     raise InterfaceError("trying to put unkeyed client")
             if len(self._pool) < self.connections_min and not close:
                 # TODO: verify connection still valid
+                if self.check_if_connection_valid:
+                    # If the connection is currently executing a query, it shouldn't be reused.
+                    # Explicitly disconnect it instead.
+                    if client.connection.is_query_executing:
+                        client.disconnect()
                 if client.connection.connected:
                     self._pool.append(client)
             else:
