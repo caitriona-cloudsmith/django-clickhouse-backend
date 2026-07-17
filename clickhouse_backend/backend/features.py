@@ -34,6 +34,10 @@ class DatabaseFeatures(BaseDatabaseFeatures):
 
     can_release_savepoints = False
 
+    # DatabaseCreation._clone_test_db is implemented, so test databases can be
+    # cloned for `manage.py test --parallel`.
+    can_clone_databases = True
+
     # Is there a true datatype for uuid?
     has_native_uuid_field = True
 

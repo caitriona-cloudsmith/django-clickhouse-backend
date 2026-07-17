@@ -83,3 +83,61 @@ class DatabaseCreationTests(SimpleTestCase):
                 DatabaseCreation, "_database_exists", return_value=True
             ):
                 creation._create_test_db(verbosity=0, autoclobber=False, keepdb=True)
+
+    def test_clone_test_db_creates_and_migrates_clone(self):
+        creation = DatabaseCreation(connection)
+        source_name = connection.settings_dict["NAME"]
+        target_name = creation.get_test_db_clone_settings("3")["NAME"]
+
+        # Capture the database the migration is run against so we can assert the
+        # connection is pointed at the clone while migrating and restored after.
+        migrated_against = []
+
+        def fake_migrate(*args, **kwargs):
+            migrated_against.append(connection.settings_dict["NAME"])
+
+        with mock.patch.object(
+            BaseDatabaseCreation, "_execute_create_test_db"
+        ) as execute_create, mock.patch(
+            "clickhouse_backend.backend.creation.call_command", side_effect=fake_migrate
+        ) as call_command:
+            creation._clone_test_db(suffix="3", verbosity=0, keepdb=False)
+
+        # The clone database was created with the "<name>_<suffix>" name.
+        execute_create.assert_called_once()
+        params = execute_create.call_args.args[1]
+        self.assertEqual(params["dbname"], connection.ops.quote_name(target_name))
+        # Schema is reproduced by re-running migrations against the clone.
+        call_command.assert_called_once()
+        self.assertEqual(call_command.call_args.args[0], "migrate")
+        self.assertTrue(call_command.call_args.kwargs["run_syncdb"])
+        self.assertEqual(migrated_against, [target_name])
+        # The connection is restored to the source database afterwards.
+        self.assertEqual(connection.settings_dict["NAME"], source_name)
+
+    def test_clone_test_db_keepdb_existing_skips_work(self):
+        creation = DatabaseCreation(connection)
+        with mock.patch.object(
+            DatabaseCreation, "_database_exists", return_value=True
+        ), mock.patch.object(
+            BaseDatabaseCreation, "_execute_create_test_db"
+        ) as execute_create, mock.patch(
+            "clickhouse_backend.backend.creation.call_command"
+        ) as call_command:
+            creation._clone_test_db(suffix="3", verbosity=0, keepdb=True)
+
+        # An existing clone that is being kept is left untouched.
+        execute_create.assert_not_called()
+        call_command.assert_not_called()
+
+    def test_clone_test_db_unmanaged_noop(self):
+        creation = DatabaseCreation(connection)
+        with self.changed_test_settings(managed=False):
+            with mock.patch.object(
+                BaseDatabaseCreation, "_execute_create_test_db"
+            ) as execute_create, mock.patch(
+                "clickhouse_backend.backend.creation.call_command"
+            ) as call_command:
+                creation._clone_test_db(suffix="3", verbosity=0, keepdb=False)
+        execute_create.assert_not_called()
+        call_command.assert_not_called()
