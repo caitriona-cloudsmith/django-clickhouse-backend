@@ -1,3 +1,5 @@
+import re
+
 from django.db import connection
 from django.test import TestCase
 
@@ -7,16 +9,37 @@ from clickhouse_backend.utils.timezone import get_timezone
 from . import models
 
 
+def normalize_engine_full(engine_full):
+    """Normalize engine_full for comparison across ClickHouse versions.
+
+    Newer ClickHouse versions preserve parentheses around single-expression
+    PARTITION BY / PRIMARY KEY clauses that older versions strip.
+    """
+    engine_full = re.sub(
+        r"PARTITION BY \((.*)\) PRIMARY KEY",
+        r"PARTITION BY \1 PRIMARY KEY",
+        engine_full,
+    )
+    engine_full = re.sub(
+        r"PRIMARY KEY \(([^)]*)\) ORDER BY",
+        r"PRIMARY KEY \1 ORDER BY",
+        engine_full,
+    )
+    return engine_full
+
+
 class TestMergeTree(TestCase):
     def assertEngineEquals(self, model, engine):
         with connection.cursor() as cursor:
             cursor.execute(
-                f"select engine_full from system.tables where table='{model._meta.db_table}'"
+                "select engine_full from system.tables "
+                "where database = currentDatabase() and table = %s",
+                [model._meta.db_table],
             )
             engine_full = cursor.fetchone()[0]
         self.assertEqual(
-            engine_full.partition(" SETTINGS ")[0],
-            engine,
+            normalize_engine_full(engine_full.partition(" SETTINGS ")[0]),
+            normalize_engine_full(engine),
         )
 
     def test_table(self):
@@ -31,9 +54,11 @@ class TestMergeTree(TestCase):
             models.ReplicatedReplacingMergeTree,
             "ReplicatedReplacingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}', ver, is_deleted) ORDER BY id",
         )
+        # ClickHouse expands {database} in the stored engine_full.
+        db_name = connection.settings_dict["NAME"]
         self.assertEngineEquals(
             models.ReplicatedReplacingMergeTreeWithZooReplica,
-            "ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/table_name', '{replica}') ORDER BY id",
+            f"ReplicatedReplacingMergeTree('/clickhouse/tables/{db_name}/{{shard}}/table_name', '{{replica}}') ORDER BY id",
         )
 
     def test_mergetree_init_exception(self):
@@ -58,7 +83,9 @@ class TestEngineSettings(TestCase):
         opts = models.EngineWithSettings._meta
         with connection.cursor() as cursor:
             cursor.execute(
-                f"select engine_full from system.tables where table='{opts.db_table}'"
+                "select engine_full from system.tables "
+                "where database = currentDatabase() and table = %s",
+                [opts.db_table],
             )
             engine_full = cursor.fetchone()[0]
         for k, v in opts.engine.settings.items():

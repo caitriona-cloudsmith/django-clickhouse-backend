@@ -117,7 +117,11 @@ if __name__ == "__main__":
     django.setup()
 
     parallel = options.parallel
-    if compat.dj_ge4 and parallel in {0, "auto"}:
+    # Default to sequential. Auto-parallel is opt-in via bare ``--parallel``
+    # (const "auto") so the suite does not suddenly fan out when
+    # ``can_clone_databases`` becomes True — several test models use
+    # cluster-wide state that is sensitive to worker clones.
+    if compat.dj_ge4 and parallel == "auto":
         # This doesn't work before django.setup() on some databases.
         from django.db import connections
         from django.test.runner import get_max_test_processes
@@ -126,6 +130,8 @@ if __name__ == "__main__":
             parallel = get_max_test_processes()
         else:
             parallel = 1
+    elif parallel == 0:
+        parallel = 1
 
     TestRunner = get_runner(settings)
     test_runner = TestRunner(

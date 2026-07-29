@@ -105,12 +105,15 @@ class DatabaseCreationTests(SimpleTestCase):
 
         # The clone database was created with the "<name>_<suffix>" name.
         execute_create.assert_called_once()
-        params = execute_create.call_args.args[1]
+        # call_args.args/kwargs require Python 3.8+; use tuple indexing for 3.7.
+        create_args, _create_kwargs = execute_create.call_args
+        params = create_args[1]
         self.assertEqual(params["dbname"], connection.ops.quote_name(target_name))
         # Schema is reproduced by re-running migrations against the clone.
         call_command.assert_called_once()
-        self.assertEqual(call_command.call_args.args[0], "migrate")
-        self.assertTrue(call_command.call_args.kwargs["run_syncdb"])
+        migrate_args, migrate_kwargs = call_command.call_args
+        self.assertEqual(migrate_args[0], "migrate")
+        self.assertTrue(migrate_kwargs["run_syncdb"])
         self.assertEqual(migrated_against, [target_name])
         # The connection is restored to the source database afterwards.
         self.assertEqual(connection.settings_dict["NAME"], source_name)
