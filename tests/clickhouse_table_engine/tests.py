@@ -9,23 +9,21 @@ from clickhouse_backend.utils.timezone import get_timezone
 from . import models
 
 
+CLAUSES = ("PARTITION BY", "PRIMARY KEY", "ORDER BY", "SAMPLE BY")
+CLAUSE_RE = re.compile(
+    r"\b(%s) \((.*?)\)(?= (?:%s)\b|$)"
+    % ("|".join(CLAUSES), "|".join((*CLAUSES, "TTL", "SETTINGS")))
+)
+
+
 def normalize_engine_full(engine_full):
     """Normalize engine_full for comparison across ClickHouse versions.
 
-    Newer ClickHouse versions preserve parentheses around single-expression
-    PARTITION BY / PRIMARY KEY clauses that older versions strip.
+    Newer ClickHouse versions preserve the parentheses wrapping a clause value
+    (``ORDER BY (id)``) that older versions strip (``ORDER BY id``). Stripping
+    them from both sides of an assertion makes the two spellings compare equal.
     """
-    engine_full = re.sub(
-        r"PARTITION BY \((.*)\) PRIMARY KEY",
-        r"PARTITION BY \1 PRIMARY KEY",
-        engine_full,
-    )
-    engine_full = re.sub(
-        r"PRIMARY KEY \(([^)]*)\) ORDER BY",
-        r"PRIMARY KEY \1 ORDER BY",
-        engine_full,
-    )
-    return engine_full
+    return CLAUSE_RE.sub(r"\1 \2", engine_full)
 
 
 class TestMergeTree(TestCase):
