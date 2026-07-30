@@ -57,6 +57,23 @@ Valid `TEST` keys:
   In order to use transactions to isolate the postgresql data of each test case (speed up test), all databases need to support transactions. You can make clickhouse connections support fake transactions. By setting 'TEST' in the database: {'fake_transaction': True}.
   But this will have a side effect, that is, the clickhouse data of each test case will not be isolated. So in general it is not recommended to use this feature unless you know very well what is the impaction.
 
+#### Parallel testing
+
+> *New in version 1.6.1:* refer [#167](https://github.com/jayvynl/django-clickhouse-backend/issues/167).
+
+`manage.py test --parallel` is supported. Each parallel worker gets its own
+cloned test database named `<test database name>_<worker id>`. Because ClickHouse
+has no `CREATE DATABASE ... AS <template>`, the clone schema is reproduced by
+re-running migrations against the clone database. This reuses the exact
+table-creation path, so `ON CLUSTER`, `{uuid}` replica paths and
+`currentDatabase()` in `Distributed` engines are all resolved for the clone.
+
+Models pinned to a **hardcoded ZooKeeper path** (a `ReplicatedMergeTree` path that
+does not embed `{uuid}` or `{database}`) cannot be cloned, because their replica
+path is not unique across databases on the same cluster and would collide with
+`REPLICA_ALREADY_EXISTS`. Use the default `{uuid}` based path (or include
+`{database}` in the path) if you need parallel testing.
+
 
 ### Auto Field
 

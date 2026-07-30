@@ -74,8 +74,10 @@ class ReplicatedReplacingMergeTreeWithZooReplica(models.ClickhouseModel):
     is_deleted = models.UInt8Field()
 
     class Meta:
+        # Embed {database} so the replica path is unique per test database and
+        # cloning for --parallel does not hit REPLICA_ALREADY_EXISTS.
         engine = models.ReplicatedReplacingMergeTree(
-            "/clickhouse/tables/{shard}/table_name",
+            "/clickhouse/tables/{database}/{shard}/table_name",
             "{replica}",
             order_by="id",
         )

@@ -1,6 +1,7 @@
 import sys
 
 from clickhouse_driver.errors import ErrorCodes
+from django.core.management import call_command
 from django.db.backends.base.creation import BaseDatabaseCreation
 from django.db.backends.utils import strip_quotes
 from django.conf import settings
@@ -129,6 +130,89 @@ class DatabaseCreation(BaseDatabaseCreation):
             sql = f"{sql} {on_cluster} SYNC"
         with self._nodb_cursor() as cursor:
             cursor.execute(sql)
+
+    def _clone_test_db(self, suffix, verbosity, keepdb=False):
+        """
+        Create a clone of the test database for a parallel worker.
+
+        ClickHouse has no ``CREATE DATABASE ... AS <template>``. Copying each
+        table's DDL is not viable either: ``SHOW CREATE TABLE`` bakes in the
+        source database name, which would make ``Distributed`` engines that
+        reference ``currentDatabase()`` point back at the source database, and
+        ``Replicated`` engines that share a ZooKeeper path would collide. So the
+        clone is populated by re-running migrations against it, reusing the exact
+        table-creation code path (ON CLUSTER, ``{uuid}`` replica paths and
+        ``currentDatabase()`` are all resolved for the clone database).
+
+        Note: models pinned to a hardcoded ZooKeeper path (one that does not
+        embed ``{uuid}`` or ``{database}``) cannot be cloned onto the same
+        cluster because their replica path is not unique, so ``--parallel`` is
+        unsupported for such models.
+        """
+        if not self.connection.settings_dict["TEST"].get("managed", True):
+            return
+        source_database_name = self.connection.settings_dict["NAME"]
+        target_database_name = self.get_test_db_clone_settings(suffix)["NAME"]
+        test_db_params = {
+            "dbname": self.connection.ops.quote_name(target_database_name),
+            "suffix": self.sql_table_creation_suffix(),
+        }
+
+        with self._nodb_cursor() as cursor:
+            already_exists = keepdb and self._database_exists(
+                cursor, target_database_name
+            )
+            if not already_exists:
+                try:
+                    self._execute_create_test_db(cursor, test_db_params, keepdb)
+                except Exception:
+                    try:
+                        if verbosity >= 1:
+                            self.log(
+                                "Destroying old test database for alias %s..."
+                                % (
+                                    self._get_database_display_str(
+                                        verbosity, target_database_name
+                                    ),
+                                )
+                            )
+                        sql = "DROP DATABASE %(dbname)s" % test_db_params
+                        on_cluster = self._get_on_cluster()
+                        if on_cluster:
+                            sql = f"{sql} {on_cluster} SYNC"
+                        cursor.execute(sql)
+                        self._execute_create_test_db(cursor, test_db_params, keepdb)
+                    except Exception as e:
+                        self.log("Got an error cloning the test database: %s" % e)
+                        sys.exit(2)
+
+        # An existing clone that is being kept is assumed to already hold the
+        # schema, mirroring how create_test_db() treats keepdb.
+        if already_exists:
+            return
+
+        self._migrate_clone_schema(
+            source_database_name, target_database_name, verbosity
+        )
+
+    def _migrate_clone_schema(
+        self, source_database_name, target_database_name, verbosity
+    ):
+        """Reproduce the schema in the clone database by running migrations."""
+        connection = self.connection
+        connection.close()
+        connection.settings_dict["NAME"] = target_database_name
+        try:
+            call_command(
+                "migrate",
+                verbosity=max(verbosity - 1, 0),
+                interactive=False,
+                database=connection.alias,
+                run_syncdb=True,
+            )
+        finally:
+            connection.settings_dict["NAME"] = source_database_name
+            connection.close()
 
     def mark_expected_failures_and_skips(self):
         """
