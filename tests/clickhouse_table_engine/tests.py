@@ -1,9 +1,10 @@
 import re
 
 from django.db import connection
+from django.db.models import F
 from django.test import TestCase
 
-from clickhouse_backend.models import MergeTree
+from clickhouse_backend.models import MergeTree, cityHash64, farmFingerprint64
 from clickhouse_backend.utils.timezone import get_timezone
 
 from . import models
@@ -59,6 +60,13 @@ class TestMergeTree(TestCase):
             f"ReplicatedReplacingMergeTree('/clickhouse/tables/{db_name}/{{shard}}/table_name', '{{replica}}') ORDER BY id",
         )
 
+    def test_sample_by(self):
+        self.assertEngineEquals(
+            models.SampleMergeTree,
+            "MergeTree ORDER BY (farmFingerprint64(uid), id) "
+            "SAMPLE BY farmFingerprint64(uid)",
+        )
+
     def test_mergetree_init_exception(self):
         with self.assertRaisesMessage(
             AssertionError, "At least one of order_by or primary_key must be provided"
@@ -66,6 +74,8 @@ class TestMergeTree(TestCase):
             MergeTree()
         with self.assertRaisesMessage(ValueError, "None is not allowed in order_by"):
             MergeTree(order_by=(None, "a"))
+        with self.assertRaisesMessage(ValueError, "None is not allowed in sample_by"):
+            MergeTree(order_by=("a", "b"), sample_by=(None,))
         with self.assertRaisesMessage(
             ValueError, "primary_key must be a prefix of order_by"
         ):
@@ -74,6 +84,49 @@ class TestMergeTree(TestCase):
             ValueError, "primary_key must be a prefix of order_by"
         ):
             MergeTree(order_by=("a", "b"), primary_key=["a", "b", "c"])
+        # ClickHouse uses order_by as the primary key when primary_key is absent.
+        with self.assertRaisesMessage(
+            ValueError, "sample_by must be present in order_by"
+        ):
+            MergeTree(order_by=("a", "b"), sample_by="c")
+        with self.assertRaisesMessage(
+            ValueError, "sample_by must be present in primary_key"
+        ):
+            MergeTree(order_by=("a", "b"), primary_key=("a",), sample_by="b")
+        with self.assertRaisesMessage(
+            ValueError, "sample_by must be present in order_by"
+        ):
+            MergeTree(order_by=(), sample_by="a")
+
+    def test_sample_by_normalization(self):
+        engine = MergeTree(order_by="id", sample_by="id")
+        self.assertEqual(engine.sample_by, ("id",))
+        self.assertEqual(MergeTree(order_by="id").sample_by, None)
+        # An empty sample_by yields no SAMPLE BY clause, so it is not validated.
+        self.assertEqual(MergeTree(order_by="id", sample_by=()).sample_by, ())
+
+    def test_sample_by_expression_spelling(self):
+        """A column may be spelled as a string or as an F object."""
+        MergeTree(order_by=(F("a"), "b"), sample_by="a")
+        MergeTree(order_by=("a", "b"), sample_by=F("a"))
+        MergeTree(
+            order_by=(farmFingerprint64(F("a")), "b"),
+            sample_by=farmFingerprint64("a"),
+        )
+        with self.assertRaisesMessage(
+            ValueError, "sample_by must be present in order_by"
+        ):
+            MergeTree(order_by=(farmFingerprint64("a"), "b"), sample_by=cityHash64("a"))
+
+    def test_sample_by_deconstruct(self):
+        """sample_by must survive serialization into a migration."""
+        path, args, kwargs = MergeTree(
+            order_by=(farmFingerprint64("uid"), "id"),
+            sample_by=farmFingerprint64("uid"),
+        ).deconstruct()
+        self.assertEqual(path, "clickhouse_backend.models.MergeTree")
+        self.assertEqual(args, ())
+        self.assertEqual(kwargs["sample_by"], farmFingerprint64("uid"))
 
 
 class TestEngineSettings(TestCase):

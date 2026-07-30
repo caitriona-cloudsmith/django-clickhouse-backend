@@ -1,6 +1,7 @@
 from django.db import NotSupportedError
 from django.db.models import Count, Window
 from django.db.models.functions import Rank
+from django.db.models.sql import Query as DjangoQuery
 from django.test import TestCase
 
 from clickhouse_backend import compat
@@ -78,3 +79,112 @@ class QueriesTests(TestCase):
                         rank=Window(Rank(), partition_by="author", order_by="name")
                     ).prewhere(rank__gt=1)
                 )
+
+
+class SampleTests(TestCase):
+    total = 10000
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.author = models.Author.objects.create(name="a1", num=1001)
+        models.Visit.objects.bulk_create(
+            models.Visit(uid=i, author=cls.author) for i in range(cls.total)
+        )
+
+    def test_sample(self):
+        sql = str(models.Visit.objects.sample(0.1).query)
+        self.assertIn("SAMPLE 0.1", sql)
+        self.assertNotIn("OFFSET", sql)
+
+    def test_sample_offset(self):
+        self.assertIn(
+            "SAMPLE 0.1 OFFSET 0.05",
+            str(models.Visit.objects.sample(0.1, 0.05).query),
+        )
+
+    def test_sample_rows(self):
+        self.assertIn("SAMPLE 1000", str(models.Visit.objects.sample(1000).query))
+
+    def test_sample_before_prewhere_and_where(self):
+        sql = str(models.Visit.objects.sample(0.1).prewhere(uid=1).filter(id=2).query)
+        self.assertLess(sql.index("SAMPLE 0.1"), sql.index("PREWHERE"))
+        self.assertLess(sql.index("PREWHERE"), sql.index("WHERE"))
+
+    def test_sample_before_join(self):
+        """SAMPLE belongs to the leftmost table, it must precede any JOIN.
+
+        Note that ClickHouse itself does not support SAMPLE together with JOIN
+        (it fails with an internal error up to at least 24.3), so only the
+        generated SQL is asserted here.
+        """
+        sql = str(
+            models.Visit.objects.sample(0.1).filter(author__name=self.author.name).query
+        )
+        self.assertRegex(sql, r'FROM "[^"]*visit" SAMPLE 0\.1 INNER JOIN ')
+
+    def test_sample_in_aggregate_subquery(self):
+        sql = str(models.Visit.objects.sample(0.1).values("uid").query)
+        self.assertIn("SAMPLE 0.1", sql)
+        self.assertEqual(models.Visit.objects.sample(1).count(), self.total)
+
+    def test_sample_result(self):
+        """SAMPLE k and SAMPLE k OFFSET k read disjoint halves of the table."""
+        first = models.Visit.objects.sample(0.5).count()
+        second = models.Visit.objects.sample(0.5, 0.5).count()
+        self.assertGreater(first, 0)
+        self.assertGreater(second, 0)
+        self.assertEqual(first + second, self.total)
+
+    def test_sample_manager(self):
+        self.assertEqual(models.Visit.objects.sample(1).count(), self.total)
+
+    def test_sample_invalid_type(self):
+        for value in ["0.1", True, None, object()]:
+            with self.subTest(value=value):
+                with self.assertRaisesMessage(
+                    TypeError, "sample_fraction must be an int or a float"
+                ):
+                    models.Visit.objects.sample(value)
+        with self.assertRaisesMessage(
+            TypeError, "sample_offset must be an int or a float"
+        ):
+            models.Visit.objects.sample(0.1, "0.1")
+
+    def test_sample_invalid_value(self):
+        with self.assertRaisesMessage(ValueError, "sample_fraction must be positive."):
+            models.Visit.objects.sample(0)
+        with self.assertRaisesMessage(ValueError, "sample_fraction must be positive."):
+            models.Visit.objects.sample(-1)
+        with self.assertRaisesMessage(
+            ValueError, "sample_fraction must not be greater than 1 when it is a float"
+        ):
+            models.Visit.objects.sample(1.5)
+        with self.assertRaisesMessage(
+            ValueError, "sample_offset must not be negative."
+        ):
+            models.Visit.objects.sample(0.1, -0.1)
+        with self.assertRaisesMessage(
+            ValueError, "sample_offset must be less than 1 when it is a float."
+        ):
+            models.Visit.objects.sample(0.1, 1.0)
+
+    def test_sample_sliced(self):
+        with self.assertRaisesMessage(
+            TypeError, "Cannot sample a query once a slice has been taken."
+        ):
+            models.Visit.objects.all()[:1].sample(0.1)
+
+    def test_sample_combined_query(self):
+        qs = models.Visit.objects.all() | models.Visit.objects.all()
+        with self.assertRaisesMessage(
+            NotSupportedError,
+            "Calling QuerySet.sample() after union() is not supported.",
+        ):
+            models.Visit.objects.union(qs).sample(0.1)
+
+    def test_no_sample_on_plain_query(self):
+        """A stock django Query has no sample attributes, it must still compile."""
+        query = DjangoQuery(models.Visit)
+        sql, _ = query.get_compiler(using="default").as_sql()
+        self.assertNotIn("SAMPLE", sql)
+        self.assertRegex(sql, r'FROM "[^"]*visit"')

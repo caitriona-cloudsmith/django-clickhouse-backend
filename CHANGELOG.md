@@ -1,3 +1,7 @@
+### Unreleased
+
+- feat: #135 support [SAMPLE BY](https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree#sample-by) in `MergeTree` family engines and the [SAMPLE clause](https://clickhouse.com/docs/sql-reference/statements/select/sample) via `QuerySet.sample()`, based on an idea from @asantoni.
+
 ### 1.6.0
 * Feat db comment db default by @jayvynl in https://github.com/jayvynl/django-clickhouse-backend/pull/146
 * tests: fix tests of Object(json) by @jayvynl in https://github.com/jayvynl/django-clickhouse-backend/pull/147

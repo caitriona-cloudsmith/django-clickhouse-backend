@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 
-from django.db.models import Func, Value
+from django.db.models import F, Func, Value
 
 __all__ = [
     "Distributed",
@@ -51,6 +51,29 @@ def value_if_string(value):
     if isinstance(value, str):
         return Value(value)
     return value
+
+
+def _expression_key(expression):
+    """Return a structural key used to compare engine key expressions.
+
+    A column may be spelled as a string or as an F object, both at the top level
+    and inside a function call, so both spellings must produce the same key.
+    Comparing expressions with == is not enough, because expression equality is
+    based on the constructor arguments: farmFingerprint64("ip") and
+    farmFingerprint64(F("ip")) are not equal even though Func normalizes both to
+    the same source expressions.
+    """
+    if isinstance(expression, str):
+        expression = F(expression)
+    if isinstance(expression, F):
+        return "F", expression.name
+    if isinstance(expression, Value):
+        return "Value", expression.value
+    if hasattr(expression, "get_source_expressions"):
+        return type(expression).__name__, tuple(
+            _expression_key(e) for e in expression.get_source_expressions()
+        )
+    return "literal", expression
 
 
 class Engine(Func):
@@ -128,6 +151,7 @@ class BaseMergeTree(Engine):
         order_by=None,
         partition_by=None,
         primary_key=None,
+        sample_by=None,
         **settings,
     ):
         assert order_by is not None or primary_key is not None, (
@@ -136,8 +160,9 @@ class BaseMergeTree(Engine):
         self.order_by = order_by
         self.primary_key = primary_key
         self.partition_by = partition_by
+        self.sample_by = sample_by
 
-        for key in ["order_by", "primary_key", "partition_by"]:
+        for key in ["order_by", "primary_key", "partition_by", "sample_by"]:
             value = getattr(self, key)
             if value is not None:
                 if isinstance(value, str) or not isinstance(value, Iterable):
@@ -157,6 +182,18 @@ class BaseMergeTree(Engine):
             and self.order_by[: len(self.primary_key)] != self.primary_key
         ):
             raise ValueError("primary_key must be a prefix of order_by")
+
+        # https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree#sample-by
+        # The sampling expression must be present in the primary key. ClickHouse
+        # uses order_by as the primary key when primary_key is not provided.
+        if self.sample_by:
+            if self.primary_key is not None:
+                key, key_name = self.primary_key, "primary_key"
+            else:
+                key, key_name = self.order_by, "order_by"
+            key_expressions = {_expression_key(e) for e in key}
+            if any(_expression_key(e) not in key_expressions for e in self.sample_by):
+                raise ValueError(f"sample_by must be present in {key_name}")
 
         super().__init__(*expressions, **settings)
 

@@ -31,6 +31,18 @@ class QuerySet(query.QuerySet):
         clone._query.add_prewhere(Q(*args, **kwargs))
         return clone
 
+    def sample(self, sample_fraction, sample_offset=None):
+        """
+        Return a new QuerySet instance that reads an approximated subset of rows.
+        https://clickhouse.com/docs/sql-reference/statements/select/sample
+        """
+        self._not_support_combined_queries("sample")
+        if self.query.is_sliced:
+            raise TypeError("Cannot sample a query once a slice has been taken.")
+        clone = self._chain()
+        clone._query.add_sample(sample_fraction, sample_offset)
+        return clone
+
     def datetimes(self, field_name, kind, order="ASC", tzinfo=None):
         """
         Return a list of datetime objects representing all available

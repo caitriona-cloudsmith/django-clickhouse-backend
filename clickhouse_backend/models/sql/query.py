@@ -11,6 +11,36 @@ from clickhouse_backend import compat
 ExplainInfo = namedtuple("ExplainInfo", ("format", "type", "options"))
 
 
+def _check_sample_value(value, name, is_offset=False):
+    """Validate a SAMPLE clause value.
+
+    https://clickhouse.com/docs/sql-reference/statements/select/sample
+
+    A sample value is a literal, it cannot be passed as a query parameter, so it
+    is interpolated into the SQL by the compiler. Rejecting anything other than a
+    number here is what makes that interpolation safe.
+    """
+    # bool is a subclass of int, but SAMPLE True is meaningless.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(
+            f"{name} must be an int or a float, got {type(value).__name__}."
+        )
+    if is_offset:
+        if value < 0:
+            raise ValueError(f"{name} must not be negative.")
+        if isinstance(value, float) and value >= 1:
+            raise ValueError(f"{name} must be less than 1 when it is a float.")
+    else:
+        if value <= 0:
+            raise ValueError(f"{name} must be positive.")
+        if isinstance(value, float) and value > 1:
+            raise ValueError(
+                f"{name} must not be greater than 1 when it is a float, "
+                f"use an int to sample a number of rows."
+            )
+    return value
+
+
 class Query(query.Query):
     def __init__(self, model, where=query.WhereNode, alias_cols=True):
         if compat.dj_ge4:
@@ -19,6 +49,8 @@ class Query(query.Query):
             super().__init__(model, where, alias_cols)
         self.setting_info = {}
         self.prewhere = query.WhereNode()
+        self.sample_fraction = None
+        self.sample_offset = None
 
     def sql_with_params(self):
         """Choose the right db when database router is used."""
@@ -28,6 +60,8 @@ class Query(query.Query):
         obj = super().clone()
         obj.setting_info = self.setting_info.copy()
         obj.prewhere = self.prewhere.clone()
+        obj.sample_fraction = self.sample_fraction
+        obj.sample_offset = self.sample_offset
         return obj
 
     def explain(self, using, format=None, type=None, **settings):
@@ -35,6 +69,15 @@ class Query(query.Query):
         q.explain_info = ExplainInfo(format, type, settings)
         compiler = q.get_compiler(using=using)
         return "\n".join(compiler.explain_query())
+
+    def add_sample(self, sample_fraction, sample_offset=None):
+        self.sample_fraction = _check_sample_value(sample_fraction, "sample_fraction")
+        if sample_offset is None:
+            self.sample_offset = None
+        else:
+            self.sample_offset = _check_sample_value(
+                sample_offset, "sample_offset", is_offset=True
+            )
 
     def add_prewhere(self, q_object):
         """

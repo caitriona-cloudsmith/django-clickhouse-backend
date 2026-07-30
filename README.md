@@ -29,6 +29,7 @@ Read [Documentation](https://github.com/jayvynl/django-clickhouse-backend/blob/m
 - Support most clickhouse data types.
 - Support [SETTINGS in SELECT Query](https://clickhouse.com/docs/en/sql-reference/statements/select/#settings-in-select-query).
 - Support [PREWHERE clause](https://clickhouse.com/docs/en/sql-reference/statements/select/prewhere).
+- Support [SAMPLE clause](https://clickhouse.com/docs/sql-reference/statements/select/sample).
 - Support query results returned in columns and [deserialized to `numpy` objects](https://clickhouse-driver.readthedocs.io/en/latest/features.html#numpy-pandas-support).
 
 **Notes:**
@@ -227,6 +228,49 @@ class Event(models.ClickhouseModel):
             ),
         )
 ```
+
+#### Sampling
+
+`MergeTree` family engines accept a `sample_by` argument, which adds a
+[SAMPLE BY](https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree#sample-by)
+clause to the table and lets queries read an approximated subset of rows.
+ClickHouse requires every sampling expression to be present in the primary key,
+which is `order_by` when `primary_key` is not provided.
+
+```python
+from django.utils import timezone
+
+from clickhouse_backend import models
+
+
+class DemoLog(models.ClickhouseModel):
+    ip = models.GenericIPAddressField(default="::")
+    timestamp = models.DateTime64Field(default=timezone.now)
+
+    class Meta:
+        engine = models.MergeTree(
+            order_by=("timestamp", models.farmFingerprint64("ip")),
+            partition_by=models.toYYYYMM("timestamp"),
+            sample_by=models.farmFingerprint64("ip"),
+        )
+```
+
+Such a table can then be queried with the
+[SAMPLE clause](https://clickhouse.com/docs/sql-reference/statements/select/sample),
+using `QuerySet.sample(sample_fraction, sample_offset=None)`:
+
+```python
+# SAMPLE 0.1, approximately a tenth of the rows.
+DemoLog.objects.sample(0.1).count()
+# SAMPLE 0.1 OFFSET 0.5, a tenth of the rows, starting from the second half.
+DemoLog.objects.sample(0.1, 0.5).count()
+# SAMPLE 10000, at least 10000 rows.
+DemoLog.objects.sample(10000).count()
+```
+
+A float is a fraction of the data and must be in `(0, 1]`, an int is a number of
+rows. Note that ClickHouse does not support the `SAMPLE` clause together with
+`JOIN`, so `sample()` cannot be combined with a lookup spanning a relation.
 
 ### Migration
 
