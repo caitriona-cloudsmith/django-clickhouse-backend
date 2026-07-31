@@ -1,8 +1,10 @@
 ### Unreleased
 
+- feat: #135 support [SAMPLE BY](https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree#sample-by) in `MergeTree` family engines and the [SAMPLE clause](https://clickhouse.com/docs/sql-reference/statements/select/sample) via `QuerySet.sample()`, based on an idea from @asantoni.
 - feat: #135 add database functions `toStartOfDay`, `toStartOfWeek`, `toStartOfMonth`, `toStartOfQuarter` and `toStartOfYear`.
 - fix: `toStartOfMinute` and the functions inheriting from it used django's own `DateTimeField` as `output_field` instead of the ClickHouse one, which does not truncate the microseconds that `DateTime` cannot hold.
 - fix: `toStartOfDay`, `toStartOfWeek`, `toStartOfMonth`, `toStartOfQuarter`, `toStartOfYear` and `toYearWeek` now always pass a timezone, defaulting to the current one like `toYYYYMM` already did. Without it ClickHouse truncates in the server timezone, so results depended on server configuration and were wrong whenever the server and the client were in different timezones, or when the offset was not a whole hour. **The `DateTime` results of `toStartOfDay` are now timezone aware**, because the returned ClickHouse type carries a timezone. The four functions returning a `Date` leave the timezone out for a `Date` or a `Date32` argument, for which ClickHouse rejects it instead of ignoring it.
+- fix: `QuerySet.union(all=True)` generated `UNION ALL ALL`, which ClickHouse rejects as a syntax error.
 
 ### 1.6.0
 * Feat db comment db default by @jayvynl in https://github.com/jayvynl/django-clickhouse-backend/pull/146

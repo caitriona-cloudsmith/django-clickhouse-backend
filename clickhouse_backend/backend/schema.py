@@ -111,7 +111,7 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
 
     def table_sql(self, model):
         # https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree/#table_engine-mergetree-creating-a-table
-        # TODO: Support SAMPLE/TTL/SETTINGS
+        # TODO: Support TTL
         """Take a model and return its table definition."""
         # Create column SQL, include constraint and index.
         column_sqls = []
@@ -268,6 +268,7 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
             order_by = engine.order_by
             partition_by = engine.partition_by
             primary_key = engine.primary_key
+            sample_by = engine.sample_by
 
             if order_by is not None:
                 yield "ORDER BY (%s)" % self._get_expression(model, *order_by)
@@ -275,6 +276,8 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
                 yield "PARTITION BY (%s)" % self._get_expression(model, *partition_by)
             if primary_key is not None:
                 yield "PRIMARY KEY (%s)" % self._get_expression(model, *primary_key)
+            if sample_by is not None:
+                yield "SAMPLE BY (%s)" % self._get_expression(model, sample_by)
         if engine.settings:
             result = []
             for setting, value in engine.settings.items():

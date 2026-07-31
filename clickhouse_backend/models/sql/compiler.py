@@ -61,6 +61,25 @@ class ClickhouseMixin:
 
 
 class SQLCompiler(ClickhouseMixin, compiler.SQLCompiler):
+    def get_combinator_sql(self, combinator, all):
+        # ClickHouse requires ALL or DISTINCT after UNION, so set_operators
+        # already spells it "UNION ALL" and django must not append a second ALL.
+        return super().get_combinator_sql(combinator, False)
+
+    def get_sample(self):
+        """Return the SAMPLE clause SQL and its parameters, empty if not sampled.
+
+        The query is not always a clickhouse_backend Query, plain django models
+        used on a clickhouse database get the stock one, hence the getattr.
+        """
+        sample_fraction = getattr(self.query, "sample_fraction", None)
+        if sample_fraction is None:
+            return "", ()
+        sample_offset = getattr(self.query, "sample_offset", None)
+        if sample_offset is None:
+            return "SAMPLE %s", (sample_fraction,)
+        return "SAMPLE %s OFFSET %s", (sample_fraction, sample_offset)
+
     def pre_sql_setup(self, with_col_aliases=False):
         """
         Do any necessary class setup immediately prior to producing SQL. This
@@ -200,7 +219,14 @@ class SQLCompiler(ClickhouseMixin, compiler.SQLCompiler):
 
                 result += [", ".join(out_cols)]
                 if from_:
-                    result += ["FROM", *from_]
+                    # SAMPLE follow the table and precede JOIN/PREWHERE/WHERE.
+                    # https://clickhouse.com/docs/reference/statements/select#syntax
+                    sample, sample_params = self.get_sample()
+                    if sample:
+                        result += ["FROM", from_[0], sample, *from_[1:]]
+                        params.extend(sample_params)
+                    else:
+                        result += ["FROM", *from_]
                 params.extend(f_params)
 
                 if prewhere:

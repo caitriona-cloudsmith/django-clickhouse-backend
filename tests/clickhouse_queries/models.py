@@ -16,3 +16,16 @@ class Book(models.ClickhouseModel):
 class Article(models.ClickhouseModel):
     title = models.StringField(max_length=10)
     book = models.Int64Field()
+
+
+class Visit(models.ClickhouseModel):
+    """A table that supports the SAMPLE clause."""
+
+    uid = models.UInt64Field()
+    author = ForeignKey(Author, on_delete=CASCADE, related_name="visits")
+
+    class Meta:
+        engine = models.MergeTree(
+            order_by=(models.farmFingerprint64("uid"), "id"),
+            sample_by=models.farmFingerprint64("uid"),
+        )

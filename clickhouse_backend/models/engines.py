@@ -128,6 +128,7 @@ class BaseMergeTree(Engine):
         order_by=None,
         partition_by=None,
         primary_key=None,
+        sample_by=None,
         **settings,
     ):
         assert order_by is not None or primary_key is not None, (
@@ -136,7 +137,9 @@ class BaseMergeTree(Engine):
         self.order_by = order_by
         self.primary_key = primary_key
         self.partition_by = partition_by
+        self.sample_by = sample_by
 
+        # sample_by is a single expression, the other keys are expression tuples.
         for key in ["order_by", "primary_key", "partition_by"]:
             value = getattr(self, key)
             if value is not None:
@@ -157,6 +160,20 @@ class BaseMergeTree(Engine):
             and self.order_by[: len(self.primary_key)] != self.primary_key
         ):
             raise ValueError("primary_key must be a prefix of order_by")
+
+        # https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree#sample-by
+        # The sampling expression must be present in the primary key. ClickHouse
+        # uses order_by as the primary key when primary_key is not provided.
+        if self.sample_by is not None:
+            if self.primary_key is not None:
+                pk = self.primary_key
+            else:
+                pk = self.order_by
+            for k in pk:
+                if self.sample_by == k:
+                    break
+            else:
+                raise ValueError("sample_by must be present in primary_key")
 
         super().__init__(*expressions, **settings)
 

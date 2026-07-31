@@ -33,6 +33,9 @@ class ClickhouseManager(models.Manager):
     def prewhere(self, *args, **kwargs):
         return self.get_queryset().prewhere(*args, **kwargs)
 
+    def sample(self, *args, **kwargs):
+        return self.get_queryset().sample(*args, **kwargs)
+
     def datetimes(self, *args, **kwargs):
         return self.get_queryset().datetimes(*args, **kwargs)
 

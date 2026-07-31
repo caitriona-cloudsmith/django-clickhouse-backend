@@ -29,6 +29,16 @@ class EngineWithSettings(models.ClickhouseModel):
         )
 
 
+class SampleMergeTree(models.ClickhouseModel):
+    uid = models.UInt64Field()
+
+    class Meta:
+        engine = models.MergeTree(
+            order_by=(models.farmFingerprint64("uid"), "id"),
+            sample_by=models.farmFingerprint64("uid"),
+        )
+
+
 class Student(models.ClickhouseModel):
     name = models.StringField()
     address = models.StringField()
