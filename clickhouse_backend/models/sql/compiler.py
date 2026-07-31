@@ -61,6 +61,11 @@ class ClickhouseMixin:
 
 
 class SQLCompiler(ClickhouseMixin, compiler.SQLCompiler):
+    def get_combinator_sql(self, combinator, all):
+        # ClickHouse requires ALL or DISTINCT after UNION, so set_operators
+        # already spells it "UNION ALL" and django must not append a second ALL.
+        return super().get_combinator_sql(combinator, False)
+
     def get_sample(self):
         """Return the SAMPLE clause SQL and its parameters, empty if not sampled.
 

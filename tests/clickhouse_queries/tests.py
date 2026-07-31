@@ -30,6 +30,11 @@ class QueriesTests(TestCase):
             ]
         )
 
+    def test_union_all(self):
+        qs = models.Author.objects.all().union(models.Author.objects.all(), all=True)
+        self.assertNotIn("UNION ALL ALL", str(qs.query))
+        self.assertEqual(len(list(qs)), 4)
+
     def test_prewhere(self):
         qs = models.Author.objects.prewhere(name="a1")
         self.assertIn("PREWHERE", str(qs.query))
