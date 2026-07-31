@@ -1,4 +1,4 @@
-from django.db import NotSupportedError
+from django.db import NotSupportedError, OperationalError
 from django.db.models import Count, Window
 from django.db.models.functions import Rank
 from django.db.models.sql import Query as DjangoQuery
@@ -138,35 +138,12 @@ class SampleTests(TestCase):
     def test_sample_manager(self):
         self.assertEqual(models.Visit.objects.sample(1).count(), self.total)
 
-    def test_sample_invalid_type(self):
-        for value in ["0.1", True, None, object()]:
-            with self.subTest(value=value):
-                with self.assertRaisesMessage(
-                    TypeError, "sample_fraction must be an int or a float"
-                ):
-                    models.Visit.objects.sample(value)
-        with self.assertRaisesMessage(
-            TypeError, "sample_offset must be an int or a float"
-        ):
-            models.Visit.objects.sample(0.1, "0.1")
-
     def test_sample_invalid_value(self):
-        with self.assertRaisesMessage(ValueError, "sample_fraction must be positive."):
-            models.Visit.objects.sample(0)
-        with self.assertRaisesMessage(ValueError, "sample_fraction must be positive."):
-            models.Visit.objects.sample(-1)
-        with self.assertRaisesMessage(
-            ValueError, "sample_fraction must not be greater than 1 when it is a float"
-        ):
-            models.Visit.objects.sample(1.5)
-        with self.assertRaisesMessage(
-            ValueError, "sample_offset must not be negative."
-        ):
-            models.Visit.objects.sample(0.1, -0.1)
-        with self.assertRaisesMessage(
-            ValueError, "sample_offset must be less than 1 when it is a float."
-        ):
-            models.Visit.objects.sample(0.1, 1.0)
+        """Sample values are not validated, ClickHouse rejects what it dislikes."""
+        for value in ["0.1", -1]:
+            with self.subTest(value=value):
+                with self.assertRaises(OperationalError):
+                    models.Visit.objects.sample(value).count()
 
     def test_sample_sliced(self):
         with self.assertRaisesMessage(

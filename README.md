@@ -231,11 +231,13 @@ class Event(models.ClickhouseModel):
 
 #### Sampling
 
-`MergeTree` family engines accept a `sample_by` argument, which adds a
+`MergeTree` family engines accept a `sample_by` argument, a single expression
+that adds a
 [SAMPLE BY](https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree#sample-by)
 clause to the table and lets queries read an approximated subset of rows.
-ClickHouse requires every sampling expression to be present in the primary key,
-which is `order_by` when `primary_key` is not provided.
+ClickHouse requires the sampling expression to be present in the primary key,
+which is `order_by` when `primary_key` is not provided. It is compared to the
+key expressions as spelled, so write it exactly as in the key.
 
 ```python
 from django.utils import timezone

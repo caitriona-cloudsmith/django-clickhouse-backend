@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 
-from django.db.models import F, Func, Value
+from django.db.models import Func, Value
 
 __all__ = [
     "Distributed",
@@ -51,29 +51,6 @@ def value_if_string(value):
     if isinstance(value, str):
         return Value(value)
     return value
-
-
-def _expression_key(expression):
-    """Return a structural key used to compare engine key expressions.
-
-    A column may be spelled as a string or as an F object, both at the top level
-    and inside a function call, so both spellings must produce the same key.
-    Comparing expressions with == is not enough, because expression equality is
-    based on the constructor arguments: farmFingerprint64("ip") and
-    farmFingerprint64(F("ip")) are not equal even though Func normalizes both to
-    the same source expressions.
-    """
-    if isinstance(expression, str):
-        expression = F(expression)
-    if isinstance(expression, F):
-        return "F", expression.name
-    if isinstance(expression, Value):
-        return "Value", expression.value
-    if hasattr(expression, "get_source_expressions"):
-        return type(expression).__name__, tuple(
-            _expression_key(e) for e in expression.get_source_expressions()
-        )
-    return "literal", expression
 
 
 class Engine(Func):
@@ -162,17 +139,18 @@ class BaseMergeTree(Engine):
         self.partition_by = partition_by
         self.sample_by = sample_by
 
-        for key in ["order_by", "primary_key", "partition_by", "sample_by"]:
-            value = getattr(self, key)
+        # sample_by is a single expression, the other keys are expression tuples.
+        for k in ["order_by", "primary_key", "partition_by"]:
+            value = getattr(self, k)
             if value is not None:
                 if isinstance(value, str) or not isinstance(value, Iterable):
                     value = (value,)
-                    setattr(self, key, value)
+                    setattr(self, k, value)
                 elif not isinstance(value, tuple):
                     value = tuple(value)
-                    setattr(self, key, value)
+                    setattr(self, k, value)
                 if any(i is None for i in value):
-                    raise ValueError(f"None is not allowed in {key}")
+                    raise ValueError(f"None is not allowed in {k}")
 
         # https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree#choosing-a-primary-key-that-differs-from-the-sorting-key
         # primary key expression tuple must be a prefix of the sorting key expression tuple.
@@ -186,14 +164,16 @@ class BaseMergeTree(Engine):
         # https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree#sample-by
         # The sampling expression must be present in the primary key. ClickHouse
         # uses order_by as the primary key when primary_key is not provided.
-        if self.sample_by:
+        if self.sample_by is not None:
             if self.primary_key is not None:
-                key, key_name = self.primary_key, "primary_key"
+                pk = self.primary_key
             else:
-                key, key_name = self.order_by, "order_by"
-            key_expressions = {_expression_key(e) for e in key}
-            if any(_expression_key(e) not in key_expressions for e in self.sample_by):
-                raise ValueError(f"sample_by must be present in {key_name}")
+                pk = self.order_by
+            for k in pk:
+                if self.sample_by == k:
+                    break
+            else:
+                raise ValueError("sample_by must be present in primary_key")
 
         super().__init__(*expressions, **settings)
 

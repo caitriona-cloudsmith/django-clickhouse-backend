@@ -62,20 +62,18 @@ class ClickhouseMixin:
 
 class SQLCompiler(ClickhouseMixin, compiler.SQLCompiler):
     def get_sample(self):
-        """Return the SAMPLE clause as a list of at most one string.
+        """Return the SAMPLE clause SQL and its parameters, empty if not sampled.
 
         The query is not always a clickhouse_backend Query, plain django models
         used on a clickhouse database get the stock one, hence the getattr.
-        Sample values are validated numbers, so they are safe to interpolate,
-        see clickhouse_backend.models.sql.query._check_sample_value.
         """
         sample_fraction = getattr(self.query, "sample_fraction", None)
         if sample_fraction is None:
-            return []
+            return "", ()
         sample_offset = getattr(self.query, "sample_offset", None)
         if sample_offset is None:
-            return ["SAMPLE %s" % sample_fraction]
-        return ["SAMPLE %s OFFSET %s" % (sample_fraction, sample_offset)]
+            return "SAMPLE %s", (sample_fraction,)
+        return "SAMPLE %s OFFSET %s", (sample_fraction, sample_offset)
 
     def pre_sql_setup(self, with_col_aliases=False):
         """
@@ -216,11 +214,14 @@ class SQLCompiler(ClickhouseMixin, compiler.SQLCompiler):
 
                 result += [", ".join(out_cols)]
                 if from_:
-                    # Support sample clause.
-                    # SAMPLE belongs to the leftmost table expression, so it must
-                    # follow the table and precede JOIN/PREWHERE/WHERE.
-                    # https://clickhouse.com/docs/sql-reference/statements/select#clauses
-                    result += ["FROM", from_[0], *self.get_sample(), *from_[1:]]
+                    # SAMPLE follow the table and precede JOIN/PREWHERE/WHERE.
+                    # https://clickhouse.com/docs/reference/statements/select#syntax
+                    sample, sample_params = self.get_sample()
+                    if sample:
+                        result += ["FROM", from_[0], sample, *from_[1:]]
+                        params.extend(sample_params)
+                    else:
+                        result += ["FROM", *from_]
                 params.extend(f_params)
 
                 if prewhere:
