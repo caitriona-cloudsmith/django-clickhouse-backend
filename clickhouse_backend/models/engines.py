@@ -140,17 +140,17 @@ class BaseMergeTree(Engine):
         self.sample_by = sample_by
 
         # sample_by is a single expression, the other keys are expression tuples.
-        for k in ["order_by", "primary_key", "partition_by"]:
-            value = getattr(self, k)
+        for key in ["order_by", "primary_key", "partition_by"]:
+            value = getattr(self, key)
             if value is not None:
                 if isinstance(value, str) or not isinstance(value, Iterable):
                     value = (value,)
-                    setattr(self, k, value)
+                    setattr(self, key, value)
                 elif not isinstance(value, tuple):
                     value = tuple(value)
-                    setattr(self, k, value)
+                    setattr(self, key, value)
                 if any(i is None for i in value):
-                    raise ValueError(f"None is not allowed in {k}")
+                    raise ValueError(f"None is not allowed in {key}")
 
         # https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree#choosing-a-primary-key-that-differs-from-the-sorting-key
         # primary key expression tuple must be a prefix of the sorting key expression tuple.
