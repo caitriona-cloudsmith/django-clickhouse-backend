@@ -94,4 +94,18 @@ tox
 
 ### Other
 
-- Don't forget writing [Changelog](CHANGELOG.md)
+- Don't forget writing [Changelog](CHANGELOG.md), under the `### Unreleased` heading.
+- When documentation describes something new, annotate it with
+  `> *New in version NEXT:*` or `> *Changed in version NEXT:*`. The release fills
+  `NEXT` in, so a pull request never has to guess the version it lands in.
+
+Release
+---
+
+```shell
+python scripts/release.py 2.0.0
+```
+
+This sets the version in `clickhouse_backend/__init__.py`, turns the `### Unreleased`
+changelog heading into the version, and replaces the `NEXT` placeholder in the
+documentation. Commit and tag as it prints; pushing the tag publishes to PyPI.
