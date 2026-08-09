@@ -59,7 +59,7 @@ Valid `TEST` keys:
 
 #### Parallel testing
 
-> *New in version NEXT:* refer [#167](https://github.com/jayvynl/django-clickhouse-backend/issues/167).
+> *New in version 2.0.0:* refer [#167](https://github.com/jayvynl/django-clickhouse-backend/issues/167).
 
 `manage.py test --parallel` is supported. Each parallel worker gets its own
 cloned test database named `<test database name>_<worker id>`. Because ClickHouse
