@@ -65,7 +65,10 @@ def main():
             required=False,
         )
 
-    print(f"\nNext: git commit -am 'Bump version to {version}' && git tag v{version}")
+    print(
+        f"\nNext: git commit -am 'Bump version to {version}' && git tag v{version}"
+        f"\nThen: git push origin main v{version}"
+    )
 
 
 if __name__ == "__main__":

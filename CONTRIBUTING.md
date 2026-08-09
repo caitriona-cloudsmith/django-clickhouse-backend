@@ -108,4 +108,11 @@ python scripts/release.py 2.0.0
 
 This sets the version in `clickhouse_backend/__init__.py`, turns the `### Unreleased`
 changelog heading into the version, and replaces the `NEXT` placeholder in the
-documentation. Commit and tag as it prints; pushing the tag publishes to PyPI.
+documentation. Commit and tag as it prints, then push the tag:
+
+```shell
+git push origin main v2.0.0
+```
+
+Pushing the tag publishes to PyPI and creates the GitHub release, whose notes are
+the changelog section of that version.

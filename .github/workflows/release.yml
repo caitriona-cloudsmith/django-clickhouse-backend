@@ -63,6 +63,7 @@ jobs:
       id-token: write  # IMPORTANT: mandatory for sigstore
 
     steps:
+    - uses: actions/checkout@v4
     - name: Download all the dists
       uses: actions/download-artifact@v4
       with:
@@ -74,13 +75,25 @@ jobs:
         inputs: >-
           ./dist/*.tar.gz
           ./dist/*.whl
-    - name: Upload artifact signatures to GitHub Release
+    - name: Publish the GitHub Release
       env:
         GITHUB_TOKEN: ${{ github.token }}
-      # Upload to GitHub Release using the `gh` CLI.
-      # `dist/` contains the built packages, and the
-      # sigstore-produced signatures and certificates.
-      run: >-
-        gh release upload
-        '${{ github.ref_name }}' dist/**
-        --repo '${{ github.repository }}'
+        TAG: ${{ github.ref_name }}
+        REPO: ${{ github.repository }}
+      # `dist/` contains the built packages, and the sigstore-produced
+      # signatures and certificates. The release already exists when it was
+      # drafted on GitHub, which creates the tag itself; a tag pushed from a
+      # clone has no release yet, so create one from the changelog section.
+      run: |
+        awk -v heading="### ${TAG#v}" '
+          $0 == heading { found = 1; next }
+          found && /^### / { exit }
+          found
+        ' CHANGELOG.md > notes.md
+        notes="--notes-file notes.md"
+        [ -s notes.md ] || notes="--generate-notes"
+        if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+          gh release upload "$TAG" dist/** --repo "$REPO"
+        else
+          gh release create "$TAG" dist/** --repo "$REPO" --title "$TAG" $notes
+        fi
